@@ -5,31 +5,322 @@ const r = Router();
 
 r.get("/health", (req, res) => res.json({ status: "ok" }));
 
-/** Папка с файлами как статика */
-r.get("/uploads/:file", (req, res) => {
-  // фактически статику отдаёт express.static в index.js — этот роут на всякий случай
-  res.status(404).end();
+/** ---------- ПУБЛИЧНЫЕ КАТЕГОРИИ ---------- */
+
+/** GET /categories/tree — получить все категории в виде дерева
+ *  Пример:
+ *  curl http://localhost:8000/categories/tree
+ *  Ответ: [{ id, name, slug, desc_product_count, sort_order, children: [...] }, ...]
+ */
+r.get("/categories/tree", async (req, res) => {
+  // Получаем все активные категории
+  const { rows } = await q(
+    `SELECT id, name, slug, parent_id, desc_product_count, sort_order
+     FROM categories
+     WHERE is_active=true
+     ORDER BY sort_order, name`
+  );
+
+  // Создаем Map для быстрого доступа по id
+  const map = new Map();
+  const roots = [];
+
+  // Сначала создаем все узлы без children
+  for (const cat of rows) {
+    const node = {
+      id: cat.id,
+      name: cat.name,
+      slug: cat.slug,
+      desc_product_count: cat.desc_product_count,
+      sort_order: cat.sort_order,
+      children: []
+    };
+    map.set(cat.id, node);
+  }
+
+  // Затем связываем детей с родителями
+  for (const cat of rows) {
+    const node = map.get(cat.id);
+    if (cat.parent_id === null) {
+      roots.push(node);
+    } else {
+      const parent = map.get(cat.parent_id);
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        // Если родитель не найден (неактивен), добавляем в корень
+        roots.push(node);
+      }
+    }
+  }
+
+  // Сортируем корневые категории
+  roots.sort((a, b) => {
+    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Рекурсивно сортируем детей
+  function sortChildren(node) {
+    node.children.sort((a, b) => {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+      return a.name.localeCompare(b.name);
+    });
+    node.children.forEach(sortChildren);
+  }
+  roots.forEach(sortChildren);
+
+  res.json(roots);
 });
 
-/** GET /products/:slug — карточка товара */
+/** GET /categories
+ *  Параметры (опц.): parent_slug — тогда вернём только детей указанной категории.
+ *  Примеры:
+ *  - Все активные категории:
+ *    curl http://localhost:8000/categories
+ *  - Дети конкретной категории:
+ *    curl "http://localhost:8000/categories?parent_slug=laptops"
+ */
+r.get("/categories", async (req, res) => {
+  const { parent_slug } = req.query;
+  if (parent_slug) {
+    const { rows: parent } = await q(
+      "SELECT id FROM categories WHERE slug=$1 AND is_active=true",
+      [parent_slug]
+    );
+    if (!parent[0]) return res.json([]);
+    const { rows } = await q(
+      `SELECT id, name, slug, desc_product_count, sort_order
+       FROM categories
+       WHERE parent_id=$1 AND is_active=true
+       ORDER BY sort_order, name`,
+      [parent[0].id]
+    );
+    return res.json(rows);
+  }
+  // Все активные категории (для дерева на фронте можно сгруппировать по parent_id)
+  const { rows } = await q(
+    `SELECT id, name, slug, parent_id, desc_product_count, sort_order
+     FROM categories
+     WHERE is_active=true
+     ORDER BY parent_id NULLS FIRST, sort_order, name`
+  );
+  res.json(rows);
+});
+
+/** GET /categories/:slug — данные категории
+ *  Если есть подкатегории → {category, children[], featured[]}
+ *  Если лист → {category, products[], featured[]}
+ *  Параметры листа: page, limit, sort=(price_asc|price_desc|name_asc|name_desc|new)
+ *  Примеры:
+ *  - Категория с подкатегориями:
+ *    curl http://localhost:8000/categories/electronics
+ *  - Лист с товарами, сортировка по цене по возрастанию и пагинация:
+ *    curl "http://localhost:8000/categories/laptops?sort=price_asc&page=1&limit=20"
+ */
+r.get("/categories/:slug", async (req, res) => {
+  const slug = req.params.slug;
+  const { rows: catRows } = await q(
+    "SELECT id, name, slug, path, featured_only, desc_product_count FROM categories WHERE slug=$1 AND is_active=true",
+    [slug]
+  );
+  const category = catRows[0];
+  if (!category) return res.status(404).json({ error: "NOT_FOUND" });
+
+  // Подкатегории
+  const { rows: children } = await q(
+    `SELECT id, name, slug, desc_product_count, sort_order
+     FROM categories
+     WHERE parent_id=$1 AND is_active=true
+     ORDER BY sort_order, name`,
+    [category.id]
+  );
+
+  // Featured товары в поддереве (до 3 шт.)
+  const { rows: featured } = await q(
+    `SELECT p.id, p.name, p.slug, p.price, p.primary_image_url, p.doc_url
+     FROM products p
+     JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active=true AND p.is_featured=true
+       AND (c.path = $1 OR c.path LIKE $1 || '/%')
+     ORDER BY p.id DESC
+     LIMIT 3`,
+    [category.path]
+  );
+
+  if (children.length > 0) {
+    // Не лист — возвращаем подкатегории + featured
+    return res.json({ category, children, featured });
+  }
+
+  // Лист — возвращаем товары с пагинацией/сортировкой
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || "20", 10)));
+  const offset = (page - 1) * limit;
+
+  const sortMap = {
+    price_asc: "price ASC",
+    price_desc: "price DESC",
+    name_asc: "name ASC",
+    name_desc: "name DESC",
+    new: "id DESC",
+  };
+  const sortKey = (req.query.sort || "new").toLowerCase();
+  const orderBy = sortMap[sortKey] || sortMap.new;
+
+  // featured_only категории показывают только отмеченные
+  const onlyFeatured = !!category.featured_only;
+
+  const { rows: products, rowCount } = await q(
+    `SELECT p.id, p.name, p.slug, p.price, p.primary_image_url, p.gallery, p.doc_url
+     FROM products p
+     JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active=true
+       AND (c.path = $1 OR c.path LIKE $1 || '/%')
+       ${onlyFeatured ? "AND p.is_featured=true" : ""}
+     ORDER BY ${orderBy}
+     LIMIT $2 OFFSET $3`,
+    [category.path, limit, offset]
+  );
+
+  // Общее кол-во для пагинации
+  const { rows: cntRows } = await q(
+    `SELECT COUNT(*)::int AS cnt
+     FROM products p
+     JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active=true
+       AND (c.path = $1 OR c.path LIKE $1 || '/%')
+       ${onlyFeatured ? "AND p.is_featured=true" : ""}`,
+    [category.path]
+  );
+  const total = cntRows[0]?.cnt || 0;
+
+  return res.json({
+    category,
+    featured,
+    products,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+  });
+});
+
+/** ---------- ПУБЛИЧНЫЕ ТОВАРЫ / ПОИСК ---------- */
+/** GET /products
+ *  Параметры:
+ *   - q: строка поиска по name (ILIKE)
+ *   - category (slug): ограничить поддеревом категории
+ *   - page, limit, sort=(price_asc|price_desc|name_asc|name_desc|new)
+ *  Примеры:
+ *  - Последние товары:
+ *    curl http://localhost:8000/products
+ *  - Поиск по строке:
+ *    curl "http://localhost:8000/products?q=mac"
+ *  - Поиск в категории (slug):
+ *    curl "http://localhost:8000/products?category=laptops&sort=price_desc&page=2&limit=12"
+ */
+r.get("/products", async (req, res) => {
+  const qStr = (req.query.q || "").trim();
+  const catSlug = (req.query.category || "").trim();
+
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || "20", 10)));
+  const offset = (page - 1) * limit;
+
+  const sortMap = {
+    price_asc: "p.price ASC",
+    price_desc: "p.price DESC",
+    name_asc: "p.name ASC",
+    name_desc: "p.name DESC",
+    new: "p.id DESC",
+  };
+  const sortKey = (req.query.sort || "new").toLowerCase();
+  const orderBy = sortMap[sortKey] || sortMap.new;
+
+  // если пришёл category=slug — найдём path
+  let pathCond = "";
+  let params = [];
+  if (catSlug) {
+    const { rows: cat } = await q(
+      "SELECT path FROM categories WHERE slug=$1 AND is_active=true",
+      [catSlug]
+    );
+    if (!cat[0]) return res.json({ products: [], pagination: { page, limit, total: 0, pages: 0 } });
+    params.push(cat[0].path);
+    pathCond = "AND (c.path = $1 OR c.path LIKE $1 || '/%')";
+  }
+
+  // строка поиска
+  let searchCond = "";
+  if (qStr) {
+    params.push(`%${qStr}%`);
+    searchCond += ` AND p.name ILIKE $${params.length}`;
+  }
+
+  // данные
+  params.push(limit);
+  params.push(offset);
+  const { rows: products } = await q(
+    `SELECT p.id, p.name, p.slug, p.price, p.primary_image_url, p.doc_url
+     FROM products p
+     JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active=true
+       ${pathCond}
+       ${searchCond}
+     ORDER BY ${orderBy}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+
+  // count
+  const countParams = params.slice(0, params.length - 2); // без limit/offset
+  const { rows: cntRows } = await q(
+    `SELECT COUNT(*)::int AS cnt
+     FROM products p
+     JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active=true
+       ${pathCond}
+       ${searchCond}`,
+    countParams
+  );
+  const total = cntRows[0]?.cnt || 0;
+
+  res.json({ products, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+});
+
+/** ---------- КАРТОЧКА ТОВАРА ---------- */
+/**
+ * GET /products/:slug — карточка
+ * Пример:
+ * curl http://localhost:8000/products/mbp-14
+ */
 r.get("/products/:slug", async (req, res) => {
   const { rows } = await q("SELECT * FROM products WHERE slug=$1 AND is_active=true", [req.params.slug]);
   if (!rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
   res.json(rows[0]);
 });
 
-/** POST /orders — оформление заказа */
+/** ---------- ОФОРМЛЕНИЕ ЗАКАЗА ---------- */
+/**
+ * POST /orders — создать заказ
+ * Пример:
+ * curl -X POST http://localhost:8000/orders \
+ *   -H "Content-Type: application/json" \
+ *   -d '{
+ *     "customer_name":"Иван",
+ *     "email":"ivan@example.com",
+ *     "phone":"+79990000000",
+ *     "comment":"Позвонить перед доставкой",
+ *     "items":[{"product_id":1,"qty":2},{"product_id":2,"qty":1}]
+ *   }'
+ */
 r.post("/orders", async (req, res) => {
   const { idempotency_key = null, customer_name, email, phone, comment, address_json = null, items } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "ITEMS_REQUIRED" });
 
-  // идемпотентность (если ключ передан)
   if (idempotency_key) {
     const { rows: ex } = await q("SELECT id FROM orders WHERE idempotency_key=$1", [idempotency_key]);
     if (ex[0]) return res.status(200).json({ order_id: ex[0].id, status: "duplicate" });
   }
 
-  // подтянем актуальные цены и проверим активность
   const ids = items.map(it => Number(it.product_id)).filter(Boolean);
   const { rows: prods } = await q(`SELECT id, price, is_active FROM products WHERE id = ANY($1::int[])`, [ids]);
   const map = new Map(prods.map(p => [p.id, p]));
@@ -42,7 +333,6 @@ r.post("/orders", async (req, res) => {
     total += p.price * qty;
   }
 
-  // создаём заказ
   const { rows: ord } = await q(
     `INSERT INTO orders(customer_name,email,phone,comment,address_json,total_amount,idempotency_key)
      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
@@ -50,7 +340,6 @@ r.post("/orders", async (req, res) => {
   );
   const orderId = ord[0].id;
 
-  // позиции
   const values = [];
   const params = [];
   let i = 1;
@@ -64,7 +353,6 @@ r.post("/orders", async (req, res) => {
      VALUES ${values.join(",")}`, params
   );
 
-  // TODO: отправка email (позже добавим SMTP)
   return res.status(201).json({ order_id: orderId, total_amount: total });
 });
 
