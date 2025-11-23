@@ -33,7 +33,7 @@ r.get("/categories/tree", async (req, res) => {
       slug: cat.slug,
       desc_product_count: cat.desc_product_count,
       sort_order: cat.sort_order,
-      children: []
+      children: [],
     };
     map.set(cat.id, node);
   }
@@ -127,7 +127,7 @@ r.get("/categories/:slug", async (req, res) => {
   const category = catRows[0];
   if (!category) return res.status(404).json({ error: "NOT_FOUND" });
 
-  // Подкатегории
+  // 1) Подкатегории
   const { rows: children } = await q(
     `SELECT id, name, slug, desc_product_count, sort_order
      FROM categories
@@ -136,7 +136,7 @@ r.get("/categories/:slug", async (req, res) => {
     [category.id]
   );
 
-  // Featured товары в поддереве (до 3 шт.)
+  // 2) Featured товары в поддереве (как у тебя)
   const { rows: featured } = await q(
     `SELECT p.id, p.name, p.slug, p.price, p.primary_image_url, p.doc_url
      FROM products p
@@ -149,13 +149,54 @@ r.get("/categories/:slug", async (req, res) => {
   );
 
   if (children.length > 0) {
-    // Не лист — возвращаем подкатегории + featured
-    return res.json({ category, children, featured });
+    // 3) Превью товаров для каждого child: 1–3 шт
+    const childIds = children.map((c) => c.id);
+
+    const { rows: previews } = await q(
+      `
+      SELECT x.category_id, x.id, x.name, x.slug, x.primary_image_url
+      FROM (
+        SELECT
+          p.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY p.category_id
+            ORDER BY p.is_featured DESC, p.id DESC
+          ) AS rn
+        FROM products p
+        WHERE p.is_active=true
+          AND p.category_id = ANY($1)
+      ) x
+      WHERE x.rn <= 3
+      ORDER BY x.category_id, x.rn;
+      `,
+      [childIds]
+    );
+
+    // 4) Склеиваем превьюшки с children
+    const byCat = new Map();
+    for (const row of previews) {
+      if (!byCat.has(row.category_id)) byCat.set(row.category_id, []);
+      byCat.get(row.category_id).push({
+        name: row.name,
+        slug: row.slug,
+        primary_image_url: row.primary_image_url,
+      });
+    }
+
+    const childrenWithPreview = children.map((ch) => ({
+      ...ch,
+      products_preview: byCat.get(ch.id) || [],
+    }));
+
+    return res.json({ category, children: childrenWithPreview, featured });
   }
 
-  // Лист — возвращаем товары с пагинацией/сортировкой
+  // --- дальше у тебя листовая логика без изменений ---
   const page = Math.max(1, parseInt(req.query.page || "1", 10));
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || "20", 10)));
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(req.query.limit || "20", 10))
+  );
   const offset = (page - 1) * limit;
 
   const sortMap = {
@@ -168,10 +209,9 @@ r.get("/categories/:slug", async (req, res) => {
   const sortKey = (req.query.sort || "new").toLowerCase();
   const orderBy = sortMap[sortKey] || sortMap.new;
 
-  // featured_only категории показывают только отмеченные
   const onlyFeatured = !!category.featured_only;
 
-  const { rows: products, rowCount } = await q(
+  const { rows: products } = await q(
     `SELECT p.id, p.name, p.slug, p.price, p.primary_image_url, p.gallery, p.doc_url
      FROM products p
      JOIN categories c ON c.id = p.category_id
@@ -183,7 +223,6 @@ r.get("/categories/:slug", async (req, res) => {
     [category.path, limit, offset]
   );
 
-  // Общее кол-во для пагинации
   const { rows: cntRows } = await q(
     `SELECT COUNT(*)::int AS cnt
      FROM products p
@@ -199,7 +238,7 @@ r.get("/categories/:slug", async (req, res) => {
     category,
     featured,
     products,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
   });
 });
 
@@ -222,7 +261,10 @@ r.get("/products", async (req, res) => {
   const catSlug = (req.query.category || "").trim();
 
   const page = Math.max(1, parseInt(req.query.page || "1", 10));
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || "20", 10)));
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(req.query.limit || "20", 10))
+  );
   const offset = (page - 1) * limit;
 
   const sortMap = {
@@ -243,7 +285,11 @@ r.get("/products", async (req, res) => {
       "SELECT path FROM categories WHERE slug=$1 AND is_active=true",
       [catSlug]
     );
-    if (!cat[0]) return res.json({ products: [], pagination: { page, limit, total: 0, pages: 0 } });
+    if (!cat[0])
+      return res.json({
+        products: [],
+        pagination: { page, limit, total: 0, pages: 0 },
+      });
     params.push(cat[0].path);
     pathCond = "AND (c.path = $1 OR c.path LIKE $1 || '/%')";
   }
@@ -283,7 +329,10 @@ r.get("/products", async (req, res) => {
   );
   const total = cntRows[0]?.cnt || 0;
 
-  res.json({ products, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  res.json({
+    products,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+  });
 });
 
 /** ---------- КАРТОЧКА ТОВАРА ---------- */
@@ -293,7 +342,10 @@ r.get("/products", async (req, res) => {
  * curl http://localhost:8000/products/mbp-14
  */
 r.get("/products/:slug", async (req, res) => {
-  const { rows } = await q("SELECT * FROM products WHERE slug=$1 AND is_active=true", [req.params.slug]);
+  const { rows } = await q(
+    "SELECT * FROM products WHERE slug=$1 AND is_active=true",
+    [req.params.slug]
+  );
   if (!rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
   res.json(rows[0]);
 });
@@ -313,23 +365,45 @@ r.get("/products/:slug", async (req, res) => {
  *   }'
  */
 r.post("/orders", async (req, res) => {
-  const { idempotency_key = null, customer_name, email, phone, comment, address_json = null, items } = req.body || {};
-  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "ITEMS_REQUIRED" });
+  const {
+    idempotency_key = null,
+    customer_name,
+    email,
+    phone,
+    comment,
+    address_json = null,
+    items,
+  } = req.body || {};
+  if (!Array.isArray(items) || items.length === 0)
+    return res.status(400).json({ error: "ITEMS_REQUIRED" });
 
   if (idempotency_key) {
-    const { rows: ex } = await q("SELECT id FROM orders WHERE idempotency_key=$1", [idempotency_key]);
-    if (ex[0]) return res.status(200).json({ order_id: ex[0].id, status: "duplicate" });
+    const { rows: ex } = await q(
+      "SELECT id FROM orders WHERE idempotency_key=$1",
+      [idempotency_key]
+    );
+    if (ex[0])
+      return res.status(200).json({ order_id: ex[0].id, status: "duplicate" });
   }
 
-  const ids = items.map(it => Number(it.product_id)).filter(Boolean);
-  const { rows: prods } = await q(`SELECT id, price, is_active FROM products WHERE id = ANY($1::int[])`, [ids]);
-  const map = new Map(prods.map(p => [p.id, p]));
+  const ids = items.map((it) => Number(it.product_id)).filter(Boolean);
+  const { rows: prods } = await q(
+    `SELECT id, price, is_active FROM products WHERE id = ANY($1::int[])`,
+    [ids]
+  );
+  const map = new Map(prods.map((p) => [p.id, p]));
   let total = 0;
   for (const it of items) {
     const p = map.get(Number(it.product_id));
-    if (!p || !p.is_active) return res.status(400).json({ error: "INVALID_PRODUCT", product_id: it.product_id });
+    if (!p || !p.is_active)
+      return res
+        .status(400)
+        .json({ error: "INVALID_PRODUCT", product_id: it.product_id });
     const qty = Number(it.qty || 0);
-    if (!Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "INVALID_QTY", product_id: it.product_id });
+    if (!Number.isInteger(qty) || qty <= 0)
+      return res
+        .status(400)
+        .json({ error: "INVALID_QTY", product_id: it.product_id });
     total += p.price * qty;
   }
 
@@ -350,7 +424,8 @@ r.post("/orders", async (req, res) => {
   }
   await q(
     `INSERT INTO order_items(order_id, product_id, qty, price_at_purchase)
-     VALUES ${values.join(",")}`, params
+     VALUES ${values.join(",")}`,
+    params
   );
 
   return res.status(201).json({ order_id: orderId, total_amount: total });
