@@ -344,6 +344,68 @@ r.delete("/products/:id/doc", async (req, res) => {
   res.json(rows[0]);
 });
 
+// PATCH /admin/products/:id — частичный апдейт
+r.patch("/products/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
+
+  // 1) берём старый продукт
+  const { rows: oldRows } = await q(`SELECT * FROM products WHERE id=$1`, [id]);
+  if (!oldRows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+
+  const oldP = oldRows[0];
+  const body = req.body || {};
+
+  // 2) подмешиваем новые поля поверх старых
+  const name = body.name ?? oldP.name;
+  const slug = body.slug ?? oldP.slug;
+  const sku = body.sku ?? oldP.sku;
+  const price = body.price ?? oldP.price;
+  const is_active = body.is_active ?? oldP.is_active;
+  const is_featured = body.is_featured ?? oldP.is_featured;
+  const category_id = body.category_id ?? oldP.category_id;
+  const primary_image_url = body.primary_image_url ?? oldP.primary_image_url;
+  const gallery = body.gallery ?? oldP.gallery ?? [];
+  const doc_url = body.doc_url ?? oldP.doc_url;
+  const doc_meta = body.doc_meta ?? oldP.doc_meta;
+  const content_html = body.content_html ?? oldP.content_html;
+  const specs_html = body.specs_html ?? oldP.specs_html;
+
+  if (!name || !slug || !Number.isInteger(price) || !category_id) {
+    return res.status(400).json({
+      error: "REQUIRED_FIELDS: name, slug, price(int), category_id",
+    });
+  }
+
+  // 3) апдейтим
+  const { rows } = await q(
+    `UPDATE products SET
+       name=$1, slug=$2, sku=$3, price=$4, is_active=$5, is_featured=$6, category_id=$7,
+       primary_image_url=$8, gallery=$9, doc_url=$10, doc_meta=$11, content_html=$12, specs_html=$13,
+       updated_at=NOW()
+     WHERE id=$14
+     RETURNING *`,
+    [
+      name,
+      slug,
+      sku,
+      price,
+      is_active,
+      is_featured,
+      category_id,
+      primary_image_url,
+      JSON.stringify(gallery),
+      doc_url,
+      doc_meta,
+      content_html,
+      specs_html,
+      id,
+    ]
+  );
+
+  res.json(rows[0]);
+});
+
 /** SOFT DELETE /admin/products/:id — деактивировать товар */
 /**
  * curl -X DELETE http://localhost:8000/admin/products/1 \
