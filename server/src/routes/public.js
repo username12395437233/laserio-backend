@@ -154,20 +154,31 @@ r.get("/categories/:slug", async (req, res) => {
 
     const { rows: previews } = await q(
       `
-      SELECT x.category_id, x.id, x.name, x.slug, x.primary_image_url
-      FROM (
+      WITH child_paths AS (
+        SELECT id AS child_id, path AS child_path
+        FROM categories
+        WHERE id = ANY($1)
+      ),
+      ranked AS (
         SELECT
-          p.*,
+          cp.child_id,
+          p.id,
+          p.name,
+          p.slug,
+          p.primary_image_url,
           ROW_NUMBER() OVER (
-            PARTITION BY p.category_id
+            PARTITION BY cp.child_id
             ORDER BY p.is_featured DESC, p.id DESC
           ) AS rn
-        FROM products p
-        WHERE p.is_active=true
-          AND p.category_id = ANY($1)
-      ) x
-      WHERE x.rn <= 3
-      ORDER BY x.category_id, x.rn;
+        FROM child_paths cp
+        JOIN categories c ON (c.path = cp.child_path OR c.path LIKE cp.child_path || '/%')
+        JOIN products p ON p.category_id = c.id
+        WHERE p.is_active = true
+      )
+      SELECT child_id AS category_id, id, name, slug, primary_image_url
+      FROM ranked
+      WHERE rn <= 3
+      ORDER BY category_id, rn;
       `,
       [childIds]
     );
