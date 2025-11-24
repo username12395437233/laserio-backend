@@ -101,10 +101,10 @@ ADMIN_PASSWORD=secret
 - `PATCH /admin/products/:id/images/:imageId/primary` - установка главного фото
 - `DELETE /admin/products/:id/images/:imageId` - удаление фото из галереи
 - `POST /admin/products/:id/doc` - загрузка PDF документа
-- `POST /admin/media-library` - создать свободное изображение (name + url)
+- `POST /admin/media-library` - загрузить фото (multipart: file + name), URL генерируется автоматически
 - `GET /admin/media-library` - список свободных изображений
 - `GET /admin/media-library/:id` - получить запись
-- `PUT /admin/media-library/:id` - обновить имя/URL
-- `DELETE /admin/media-library/:id` - удалить запись
+- `PATCH /admin/media-library/:id` - обновить только имя
+- `DELETE /admin/media-library/:id` - удалить запись и файл
 
 Все админ эндпоинты требуют заголовок `Authorization: Bearer <token>`

@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import fs from "node:fs";
 import { q } from "../db.js";
 import { signAdminJwt, requireAdmin } from "../auth.js";
-import { uploadToProduct, upload } from "../utils/multer.js";
+import { uploadToProduct, uploadToMediaLibrary, upload } from "../utils/multer.js";
 
 const r = Router();
 
@@ -442,19 +442,33 @@ r.delete("/products/:id", async (req, res) => {
 });
 
 /** ---------- MEDIA LIBRARY (standalone image metadata) ---------- */
-r.post("/media-library", async (req, res) => {
-  const name = (req.body?.name || "").trim();
-  const url = (req.body?.url || "").trim();
-  if (!name) return res.status(400).json({ error: "NAME_REQUIRED" });
-  if (!url) return res.status(400).json({ error: "URL_REQUIRED" });
-  const { rows } = await q(
-    `INSERT INTO media_library(name, url)
-     VALUES($1, $2)
-     RETURNING id, name, url, created_at, updated_at`,
-    [name, url]
-  );
-  res.status(201).json(rows[0]);
-});
+/** POST /admin/media-library — загрузить фото и создать запись
+ *  multipart/form-data: file (обязательно), name (обязательно)
+ *  Пример:
+ *  curl -X POST http://localhost:8000/admin/media-library \
+ *    -H "Authorization: Bearer <TOKEN>" \
+ *    -F file=@./image.jpg \
+ *    -F name="Баннер главной страницы"
+ */
+r.post(
+  "/media-library",
+  uploadToMediaLibrary().single("file"),
+  async (req, res) => {
+    const name = (req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "NAME_REQUIRED" });
+    if (!req.file) return res.status(400).json({ error: "FILE_REQUIRED" });
+
+    const url = `/uploads/media-library/${req.file.filename}`;
+
+    const { rows } = await q(
+      `INSERT INTO media_library(name, url)
+       VALUES($1, $2)
+       RETURNING id, name, url, created_at, updated_at`,
+      [name, url]
+    );
+    res.status(201).json(rows[0]);
+  }
+);
 
 r.get("/media-library", async (_req, res) => {
   const { rows } = await q(
@@ -478,29 +492,62 @@ r.get("/media-library/:id", async (req, res) => {
   res.json(rows[0]);
 });
 
-r.put("/media-library/:id", async (req, res) => {
+/** PATCH /admin/media-library/:id — обновить только имя
+ *  Пример:
+ *  curl -X PATCH http://localhost:8000/admin/media-library/1 \
+ *    -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+ *    -d '{"name":"Новое название"}'
+ */
+r.patch("/media-library/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
   const name = (req.body?.name || "").trim();
-  const url = (req.body?.url || "").trim();
   if (!name) return res.status(400).json({ error: "NAME_REQUIRED" });
-  if (!url) return res.status(400).json({ error: "URL_REQUIRED" });
+
   const { rows } = await q(
     `UPDATE media_library
-       SET name=$1, url=$2, updated_at=NOW()
-     WHERE id=$3
+       SET name=$1, updated_at=NOW()
+     WHERE id=$2
      RETURNING id, name, url, created_at, updated_at`,
-    [name, url, id]
+    [name, id]
   );
   if (!rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
   res.json(rows[0]);
 });
 
+/** DELETE /admin/media-library/:id — удалить запись и файл
+ *  Пример:
+ *  curl -X DELETE http://localhost:8000/admin/media-library/1 \
+ *    -H "Authorization: Bearer <TOKEN>"
+ */
 r.delete("/media-library/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
+
+  // Получаем URL перед удалением
+  const { rows } = await q(
+    `SELECT url FROM media_library WHERE id=$1`,
+    [id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+
+  const url = rows[0].url;
+  // Удаляем из БД
   const { rowCount } = await q(`DELETE FROM media_library WHERE id=$1`, [id]);
   if (!rowCount) return res.status(404).json({ error: "NOT_FOUND" });
+
+  // Пытаемся удалить файл (best-effort)
+  if (url && url.startsWith("/uploads/")) {
+    try {
+      const filePath = path.join("/app", url);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (e) {
+      console.warn("Failed to delete media file:", url, e);
+    }
+  }
+
   res.json({ ok: true });
 });
 

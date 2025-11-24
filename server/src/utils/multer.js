@@ -20,6 +20,23 @@ export function uploadToProduct() {
   return multer({ storage });
 }
 
+// для media library
+export function uploadToMediaLibrary() {
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join("/app/uploads/media-library");
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const name = Date.now() + "-" + Math.random().toString(36).slice(2) + ext;
+      cb(null, name);
+    },
+  });
+  return multer({ storage });
+}
+
 // универсальный (если где-то ещё пригодится)
 export const upload = multer({
   storage: multer.diskStorage({
