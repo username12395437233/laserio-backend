@@ -441,6 +441,69 @@ r.delete("/products/:id", async (req, res) => {
   res.json(rows[0]);
 });
 
+/** ---------- MEDIA LIBRARY (standalone image metadata) ---------- */
+r.post("/media-library", async (req, res) => {
+  const name = (req.body?.name || "").trim();
+  const url = (req.body?.url || "").trim();
+  if (!name) return res.status(400).json({ error: "NAME_REQUIRED" });
+  if (!url) return res.status(400).json({ error: "URL_REQUIRED" });
+  const { rows } = await q(
+    `INSERT INTO media_library(name, url)
+     VALUES($1, $2)
+     RETURNING id, name, url, created_at, updated_at`,
+    [name, url]
+  );
+  res.status(201).json(rows[0]);
+});
+
+r.get("/media-library", async (_req, res) => {
+  const { rows } = await q(
+    `SELECT id, name, url, created_at, updated_at
+     FROM media_library
+     ORDER BY id DESC`
+  );
+  res.json(rows);
+});
+
+r.get("/media-library/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
+  const { rows } = await q(
+    `SELECT id, name, url, created_at, updated_at
+     FROM media_library
+     WHERE id=$1`,
+    [id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+  res.json(rows[0]);
+});
+
+r.put("/media-library/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
+  const name = (req.body?.name || "").trim();
+  const url = (req.body?.url || "").trim();
+  if (!name) return res.status(400).json({ error: "NAME_REQUIRED" });
+  if (!url) return res.status(400).json({ error: "URL_REQUIRED" });
+  const { rows } = await q(
+    `UPDATE media_library
+       SET name=$1, url=$2, updated_at=NOW()
+     WHERE id=$3
+     RETURNING id, name, url, created_at, updated_at`,
+    [name, url, id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+  res.json(rows[0]);
+});
+
+r.delete("/media-library/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
+  const { rowCount } = await q(`DELETE FROM media_library WHERE id=$1`, [id]);
+  if (!rowCount) return res.status(404).json({ error: "NOT_FOUND" });
+  res.json({ ok: true });
+});
+
 /** --------- Категории: чтение/обновление/удаление ---------- */
 
 /** GET /admin/categories/:id */
