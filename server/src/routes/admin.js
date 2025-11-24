@@ -887,7 +887,7 @@ r.get("/orders", async (req, res) => {
   };
   const orderBy = sortMap[sortKey] || sortMap.created_at_desc;
 
-  let sql = `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status
+  let sql = `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status, shipped_items
              FROM orders WHERE 1=1`;
   const params = [];
 
@@ -927,7 +927,7 @@ r.get("/orders/:id", async (req, res) => {
 
   // Заказ
   const { rows: orderRows } = await q(
-    `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status, idempotency_key
+    `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status, idempotency_key, shipped_items
      FROM orders WHERE id=$1`,
     [orderId]
   );
@@ -950,6 +950,52 @@ r.get("/orders/:id", async (req, res) => {
     ...order,
     items,
   });
+});
+
+/** PATCH /admin/orders/:id/shipped — обновить список отправленных товаров
+ *  Body: { shipped_items: [1, 2, 3] } — массив ID из order_items
+ *  Пример:
+ *  curl -X PATCH http://localhost:8000/admin/orders/123e4567-e89b-12d3-a456-426614174000/shipped \
+ *    -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+ *    -d '{"shipped_items":[1,2,3]}'
+ */
+r.patch("/orders/:id/shipped", async (req, res) => {
+  const orderId = req.params.id;
+  const { shipped_items } = req.body || {};
+
+  if (!Array.isArray(shipped_items)) {
+    return res.status(400).json({ error: "SHIPPED_ITEMS_MUST_BE_ARRAY" });
+  }
+
+  // Проверяем, что заказ существует
+  const { rows: orderRows } = await q(
+    `SELECT id FROM orders WHERE id=$1`,
+    [orderId]
+  );
+  if (!orderRows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+
+  // Валидируем, что все shipped_items существуют в order_items этого заказа
+  if (shipped_items.length > 0) {
+    const itemIds = shipped_items.map((id) => Number(id)).filter(Boolean);
+    const { rows: validItems } = await q(
+      `SELECT id FROM order_items WHERE order_id=$1 AND id = ANY($2::int[])`,
+      [orderId, itemIds]
+    );
+    if (validItems.length !== itemIds.length) {
+      return res.status(400).json({ error: "INVALID_ORDER_ITEM_IDS" });
+    }
+  }
+
+  // Обновляем
+  const { rows } = await q(
+    `UPDATE orders
+       SET shipped_items=$1
+     WHERE id=$2
+     RETURNING id, shipped_items`,
+    [JSON.stringify(shipped_items), orderId]
+  );
+
+  res.json(rows[0]);
 });
 
 /** Admin tool: rebuild all category counts */

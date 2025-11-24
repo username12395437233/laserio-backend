@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { q } from "../db.js";
+import { sendOrderNotification } from "../utils/email.js";
 
 const r = Router();
 
@@ -514,6 +515,29 @@ r.post("/orders", async (req, res) => {
      VALUES ${values.join(",")}`,
     params
   );
+
+  // Получаем полную информацию о заказе и товарах для email
+  const { rows: orderRows } = await q(
+    `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status
+     FROM orders WHERE id=$1`,
+    [orderId]
+  );
+  const orderData = orderRows[0];
+
+  const { rows: orderItems } = await q(
+    `SELECT oi.product_id, oi.qty, oi.price_at_purchase,
+            p.name AS product_name
+     FROM order_items oi
+     LEFT JOIN products p ON p.id = oi.product_id
+     WHERE oi.order_id=$1
+     ORDER BY oi.id`,
+    [orderId]
+  );
+
+  // Отправляем email уведомление (не блокируем ответ, если ошибка)
+  sendOrderNotification(orderData, orderItems).catch((err) => {
+    console.error("Email notification error:", err);
+  });
 
   return res.status(201).json({ order_id: orderId, total_amount: total });
 });

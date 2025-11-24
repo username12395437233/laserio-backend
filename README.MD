@@ -75,6 +75,15 @@ PGPASSWORD=laserio
 # Админ (создается автоматически при первом запуске)
 ADMIN_MAIL=admin@example.com
 ADMIN_PASSWORD=secret
+
+# Email уведомления о заказах (можно использовать одну почту для отправки и получения)
+SMTP_HOST=smtp.mail.ru
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=zar.alexander00@mail.ru
+SMTP_PASSWORD=your-password-here
+SMTP_FROM=zar.alexander00@mail.ru
+ORDER_NOTIFICATION_EMAIL=zar.alexander00@mail.ru
 ```
 
 ## API
@@ -108,5 +117,6 @@ ADMIN_PASSWORD=secret
 - `DELETE /admin/media-library/:id` - удалить запись и файл
 - `GET /admin/orders` - список заказов (параметры: status, page, limit, sort)
 - `GET /admin/orders/:id` - получить заказ с товарами
+- `PATCH /admin/orders/:id/shipped` - обновить список отправленных товаров (shipped_items: массив ID из order_items)
 
 Все админ эндпоинты требуют заголовок `Authorization: Bearer <token>`

@@ -1,0 +1,3 @@
+ALTER TABLE orders
+ADD COLUMN IF NOT EXISTS shipped_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+
