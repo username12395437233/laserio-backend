@@ -32,20 +32,8 @@ export async function sendOrderNotification(orderData, items) {
     )
     .join("\n");
 
-  // Форматируем адрес, если есть
-  let addressText = "Не указан";
-  if (orderData.address_json) {
-    try {
-      const addr = typeof orderData.address_json === "string" 
-        ? JSON.parse(orderData.address_json) 
-        : orderData.address_json;
-      addressText = typeof addr === "object" 
-        ? JSON.stringify(addr, null, 2) 
-        : String(addr);
-    } catch (e) {
-      addressText = String(orderData.address_json);
-    }
-  }
+  // Адрес как строка
+  const addressText = orderData.address || "Не указан";
 
   const emailHtml = `
 <!DOCTYPE html>

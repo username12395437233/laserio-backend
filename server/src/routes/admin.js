@@ -887,7 +887,7 @@ r.get("/orders", async (req, res) => {
   };
   const orderBy = sortMap[sortKey] || sortMap.created_at_desc;
 
-  let sql = `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status, shipped_items
+  let sql = `SELECT id, created_at, customer_name, email, phone, comment, address, total_amount, status, shipped_items
              FROM orders WHERE 1=1`;
   const params = [];
 
@@ -927,7 +927,7 @@ r.get("/orders/:id", async (req, res) => {
 
   // Заказ
   const { rows: orderRows } = await q(
-    `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status, idempotency_key, shipped_items
+    `SELECT id, created_at, customer_name, email, phone, comment, address, total_amount, status, idempotency_key, shipped_items
      FROM orders WHERE id=$1`,
     [orderId]
   );

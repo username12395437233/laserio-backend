@@ -459,7 +459,7 @@ r.post("/orders", async (req, res) => {
     email,
     phone,
     comment,
-    address_json = null,
+    address = null,
     items,
   } = req.body || {};
   if (!Array.isArray(items) || items.length === 0)
@@ -496,9 +496,9 @@ r.post("/orders", async (req, res) => {
   }
 
   const { rows: ord } = await q(
-    `INSERT INTO orders(customer_name,email,phone,comment,address_json,total_amount,idempotency_key)
+    `INSERT INTO orders(customer_name,email,phone,comment,address,total_amount,idempotency_key)
      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [customer_name, email, phone, comment, address_json, total, idempotency_key]
+    [customer_name, email, phone, comment, address, total, idempotency_key]
   );
   const orderId = ord[0].id;
 
@@ -518,7 +518,7 @@ r.post("/orders", async (req, res) => {
 
   // Получаем полную информацию о заказе и товарах для email
   const { rows: orderRows } = await q(
-    `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status
+    `SELECT id, created_at, customer_name, email, phone, comment, address, total_amount, status
      FROM orders WHERE id=$1`,
     [orderId]
   );
