@@ -85,7 +85,8 @@ ADMIN_PASSWORD=secret
 - `GET /categories/tree` - дерево категорий
 - `GET /categories` - список категорий
 - `GET /categories/:slug` - категория с товарами
-- `GET /products` - поиск товаров
+- `GET /categories/:slug/products` - товары конкретной категории
+- `GET /products` - поиск товаров (возвращает id, name, slug, image)
 - `GET /products/:slug` - карточка товара
 - `POST /orders` - создание заказа
 

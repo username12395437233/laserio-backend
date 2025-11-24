@@ -108,6 +108,78 @@ r.get("/categories", async (req, res) => {
   res.json(rows);
 });
 
+/** GET /categories/:slug/products — товары категории (всего поддерева)
+ *  Параметры: page, limit, sort=(price_asc|price_desc|name_asc|name_desc|new)
+ *  Пример:
+ *    curl "http://localhost:8000/categories/laptops/products?sort=price_desc&page=2"
+ */
+r.get("/categories/:slug/products", async (req, res) => {
+  const slug = req.params.slug;
+  const { rows: catRows } = await q(
+    `SELECT id, name, slug, path, featured_only
+     FROM categories
+     WHERE slug=$1 AND is_active=true`,
+    [slug]
+  );
+  const category = catRows[0];
+  if (!category) return res.status(404).json({ error: "NOT_FOUND" });
+
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(req.query.limit || "20", 10))
+  );
+  const offset = (page - 1) * limit;
+
+  const sortMap = {
+    price_asc: "p.price ASC",
+    price_desc: "p.price DESC",
+    name_asc: "p.name ASC",
+    name_desc: "p.name DESC",
+    new: "p.id DESC",
+  };
+  const sortKey = (req.query.sort || "new").toLowerCase();
+  const orderBy = sortMap[sortKey] || sortMap.new;
+
+  const onlyFeatured = !!category.featured_only;
+
+  const listParams = [category.path, limit, offset];
+  const featuredCond = onlyFeatured ? "AND p.is_featured=true" : "";
+
+  const { rows: products } = await q(
+    `SELECT p.id, p.name, p.slug, p.price, p.primary_image_url, p.doc_url
+     FROM products p
+     JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active=true
+       AND (c.path = $1 OR c.path LIKE $1 || '/%')
+       ${featuredCond}
+     ORDER BY ${orderBy}
+     LIMIT $2 OFFSET $3`,
+    listParams
+  );
+
+  const { rows: cntRows } = await q(
+    `SELECT COUNT(*)::int AS cnt
+     FROM products p
+     JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active=true
+       AND (c.path = $1 OR c.path LIKE $1 || '/%')
+       ${featuredCond}`,
+    [category.path]
+  );
+  const total = cntRows[0]?.cnt || 0;
+
+  res.json({
+    category: {
+      id: category.id,
+      name: category.name,
+      slug: category.slug,
+    },
+    products,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+  });
+});
+
 /** GET /categories/:slug — данные категории
  *  Если есть подкатегории → {category, children[], featured[]}
  *  Если лист → {category, products[], featured[]}
@@ -316,7 +388,7 @@ r.get("/products", async (req, res) => {
   params.push(limit);
   params.push(offset);
   const { rows: products } = await q(
-    `SELECT p.id, p.name, p.slug, p.price, p.primary_image_url, p.doc_url
+    `SELECT p.id, p.name, p.slug, p.primary_image_url AS image
      FROM products p
      JOIN categories c ON c.id = p.category_id
      WHERE p.is_active=true
