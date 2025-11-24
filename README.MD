@@ -106,5 +106,7 @@ ADMIN_PASSWORD=secret
 - `GET /admin/media-library/:id` - получить запись
 - `PATCH /admin/media-library/:id` - обновить только имя
 - `DELETE /admin/media-library/:id` - удалить запись и файл
+- `GET /admin/orders` - список заказов (параметры: status, page, limit, sort)
+- `GET /admin/orders/:id` - получить заказ с товарами
 
 Все админ эндпоинты требуют заголовок `Authorization: Bearer <token>`

@@ -864,6 +864,94 @@ r.post(
   }
 );
 
+/** ---------- ORDERS ---------- */
+/** GET /admin/orders — список заказов
+ *  Параметры:
+ *   - status: фильтр по статусу
+ *   - page, limit: пагинация
+ *   - sort: created_at_asc | created_at_desc (по умолчанию created_at_desc)
+ *  Пример:
+ *  curl "http://localhost:8000/admin/orders?status=new&page=1&limit=20" \
+ *    -H "Authorization: Bearer <TOKEN>"
+ */
+r.get("/orders", async (req, res) => {
+  const status = (req.query.status || "").trim();
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || "20", 10)));
+  const offset = (page - 1) * limit;
+
+  const sortKey = (req.query.sort || "created_at_desc").toLowerCase();
+  const sortMap = {
+    created_at_asc: "created_at ASC",
+    created_at_desc: "created_at DESC",
+  };
+  const orderBy = sortMap[sortKey] || sortMap.created_at_desc;
+
+  let sql = `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status
+             FROM orders WHERE 1=1`;
+  const params = [];
+
+  if (status) {
+    params.push(status);
+    sql += ` AND status = $${params.length}`;
+  }
+
+  sql += ` ORDER BY ${orderBy} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  params.push(limit, offset);
+
+  const { rows: orders } = await q(sql, params);
+
+  // Count total
+  let countSql = `SELECT COUNT(*)::int AS cnt FROM orders WHERE 1=1`;
+  const countParams = [];
+  if (status) {
+    countParams.push(status);
+    countSql += ` AND status = $1`;
+  }
+  const { rows: cntRows } = await q(countSql, countParams);
+  const total = cntRows[0]?.cnt || 0;
+
+  res.json({
+    orders,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+  });
+});
+
+/** GET /admin/orders/:id — получить заказ с товарами
+ *  Пример:
+ *  curl http://localhost:8000/admin/orders/123e4567-e89b-12d3-a456-426614174000 \
+ *    -H "Authorization: Bearer <TOKEN>"
+ */
+r.get("/orders/:id", async (req, res) => {
+  const orderId = req.params.id;
+
+  // Заказ
+  const { rows: orderRows } = await q(
+    `SELECT id, created_at, customer_name, email, phone, comment, address_json, total_amount, status, idempotency_key
+     FROM orders WHERE id=$1`,
+    [orderId]
+  );
+  if (!orderRows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+
+  const order = orderRows[0];
+
+  // Товары заказа
+  const { rows: items } = await q(
+    `SELECT oi.id, oi.product_id, oi.qty, oi.price_at_purchase,
+            p.name AS product_name, p.slug AS product_slug, p.primary_image_url
+     FROM order_items oi
+     LEFT JOIN products p ON p.id = oi.product_id
+     WHERE oi.order_id=$1
+     ORDER BY oi.id`,
+    [orderId]
+  );
+
+  res.json({
+    ...order,
+    items,
+  });
+});
+
 /** Admin tool: rebuild all category counts */
 /**
  * curl -X POST http://localhost:8000/admin/tools/recalc-counts \
