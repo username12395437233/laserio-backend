@@ -15,7 +15,7 @@ r.get("/health", (req, res) => res.json({ status: "ok" }));
 r.get("/categories/tree", async (req, res) => {
   // Получаем все активные категории
   const { rows } = await q(
-    `SELECT id, name, slug, parent_id, desc_product_count, sort_order
+    `SELECT id, name, slug, parent_id, desc_product_count, sort_order, description
      FROM categories
      WHERE is_active=true
      ORDER BY sort_order, name`
@@ -31,6 +31,7 @@ r.get("/categories/tree", async (req, res) => {
       id: cat.id,
       name: cat.name,
       slug: cat.slug,
+      description: cat.description,
       desc_product_count: cat.desc_product_count,
       sort_order: cat.sort_order,
       children: [],
@@ -90,7 +91,7 @@ r.get("/categories", async (req, res) => {
     );
     if (!parent[0]) return res.json([]);
     const { rows } = await q(
-      `SELECT id, name, slug, desc_product_count, sort_order
+      `SELECT id, name, slug, desc_product_count, sort_order, description
        FROM categories
        WHERE parent_id=$1 AND is_active=true
        ORDER BY sort_order, name`,
@@ -100,7 +101,7 @@ r.get("/categories", async (req, res) => {
   }
   // Все активные категории (для дерева на фронте можно сгруппировать по parent_id)
   const { rows } = await q(
-    `SELECT id, name, slug, parent_id, desc_product_count, sort_order
+    `SELECT id, name, slug, parent_id, desc_product_count, sort_order, description
      FROM categories
      WHERE is_active=true
      ORDER BY parent_id NULLS FIRST, sort_order, name`
@@ -116,7 +117,7 @@ r.get("/categories", async (req, res) => {
 r.get("/categories/:slug/products", async (req, res) => {
   const slug = req.params.slug;
   const { rows: catRows } = await q(
-    `SELECT id, name, slug, path, featured_only
+    `SELECT id, name, slug, path, featured_only, description
      FROM categories
      WHERE slug=$1 AND is_active=true`,
     [slug]
@@ -174,6 +175,7 @@ r.get("/categories/:slug/products", async (req, res) => {
       id: category.id,
       name: category.name,
       slug: category.slug,
+      description: category.description,
     },
     products,
     pagination: { page, limit, total, pages: Math.ceil(total / limit) },
@@ -193,7 +195,9 @@ r.get("/categories/:slug/products", async (req, res) => {
 r.get("/categories/:slug", async (req, res) => {
   const slug = req.params.slug;
   const { rows: catRows } = await q(
-    "SELECT id, name, slug, path, featured_only, desc_product_count FROM categories WHERE slug=$1 AND is_active=true",
+    `SELECT id, name, slug, path, featured_only, desc_product_count, description
+     FROM categories
+     WHERE slug=$1 AND is_active=true`,
     [slug]
   );
   const category = catRows[0];
@@ -201,7 +205,7 @@ r.get("/categories/:slug", async (req, res) => {
 
   // 1) Подкатегории
   const { rows: children } = await q(
-    `SELECT id, name, slug, desc_product_count, sort_order
+    `SELECT id, name, slug, desc_product_count, sort_order, description
      FROM categories
      WHERE parent_id=$1 AND is_active=true
      ORDER BY sort_order, name`,

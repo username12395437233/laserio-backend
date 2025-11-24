@@ -72,6 +72,7 @@ r.post("/categories", async (req, res) => {
     is_active = true,
     featured_only = false,
     sort_order = 0,
+    description = null,
   } = req.body || {};
   if (!name || !slug)
     return res.status(400).json({ error: "NAME_SLUG_REQUIRED" });
@@ -85,9 +86,18 @@ r.post("/categories", async (req, res) => {
     path = `${pr[0].path}/${slug}`;
   }
   const { rows } = await q(
-    `INSERT INTO categories(name,slug,parent_id,path,is_active,featured_only,sort_order)
-     VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [name, slug, parent_id, path, is_active, featured_only, sort_order]
+    `INSERT INTO categories(name,slug,parent_id,path,is_active,featured_only,sort_order,description)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [
+      name,
+      slug,
+      parent_id,
+      path,
+      is_active,
+      featured_only,
+      sort_order,
+      description,
+    ]
   );
   return res.status(201).json(rows[0]);
 });
@@ -177,6 +187,7 @@ r.post("/categories", async (req, res) => {
     is_active = true,
     featured_only = false,
     sort_order = 0,
+    description = null,
   } = req.body || {};
   if (!name || !slug)
     return res.status(400).json({ error: "NAME_SLUG_REQUIRED" });
@@ -193,9 +204,18 @@ r.post("/categories", async (req, res) => {
 
   try {
     const { rows } = await q(
-      `INSERT INTO categories(name,slug,parent_id,path,is_active,featured_only,sort_order)
-       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [name, slug, parent_id, path, is_active, featured_only, sort_order]
+      `INSERT INTO categories(name,slug,parent_id,path,is_active,featured_only,sort_order,description)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [
+        name,
+        slug,
+        parent_id,
+        path,
+        is_active,
+        featured_only,
+        sort_order,
+        description,
+      ]
     );
     return res.status(201).json(rows[0]);
   } catch (e) {
@@ -449,7 +469,7 @@ r.put("/categories/:id", async (req, res) => {
 
   // 1) получаем старую категорию целиком
   const { rows: oldRows } = await q(
-    "SELECT id, name, slug, parent_id, path, is_active, featured_only, sort_order FROM categories WHERE id=$1",
+    "SELECT id, name, slug, parent_id, path, is_active, featured_only, sort_order, description FROM categories WHERE id=$1",
     [id]
   );
   if (!oldRows[0]) return res.status(404).json({ error: "NOT_FOUND" });
@@ -463,6 +483,7 @@ r.put("/categories/:id", async (req, res) => {
   const is_active = body.is_active ?? oldCat.is_active;
   const featured_only = body.featured_only ?? oldCat.featured_only;
   const sort_order = body.sort_order ?? oldCat.sort_order;
+  const description = body.description ?? oldCat.description ?? null;
 
   if (!name || !slug)
     return res.status(400).json({ error: "NAME_SLUG_REQUIRED" });
@@ -493,10 +514,21 @@ r.put("/categories/:id", async (req, res) => {
     `UPDATE categories
        SET name=$1, slug=$2, parent_id=$3, path=$4,
            is_active=$5, featured_only=$6, sort_order=$7,
+           description=$8,
            updated_at=NOW()
-     WHERE id=$8
+     WHERE id=$9
      RETURNING *`,
-    [name, slug, parent_id, newPath, is_active, featured_only, sort_order, id]
+    [
+      name,
+      slug,
+      parent_id,
+      newPath,
+      is_active,
+      featured_only,
+      sort_order,
+      description,
+      id,
+    ]
   );
 
   // 6) если изменился path — обновляем поддерево
