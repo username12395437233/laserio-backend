@@ -24,11 +24,11 @@ export async function sendOrderNotification(orderData, items) {
     return;
   }
 
-  // Форматируем список товаров
+  // Форматируем список товаров (без цен)
   const itemsList = items
     .map(
       (item, idx) =>
-        `${idx + 1}. ${item.product_name || `Товар ID: ${item.product_id}`} - ${item.qty} шт. × ${(item.price_at_purchase / 100).toFixed(2)} ₽ = ${((item.price_at_purchase * item.qty) / 100).toFixed(2)} ₽`
+        `${idx + 1}. ${item.product_name || `Товар ID: ${item.product_id}`} - ${item.qty} шт.`
     )
     .join("\n");
 
@@ -88,20 +88,15 @@ export async function sendOrderNotification(orderData, items) {
         <pre style="background: white; padding: 10px; border-radius: 5px; white-space: pre-wrap;">${addressText}</pre>
       </div>
 
-      ${orderData.comment ? `
       <div class="section">
-        <h3>Комментарий:</h3>
-        <p>${orderData.comment}</p>
+        <h3>Комментарий заказчика:</h3>
+        <p>${orderData.comment || "Нет комментария"}</p>
       </div>
-      ` : ""}
 
       <div class="section">
         <h3>Товары:</h3>
         <div class="items">
           <pre style="margin: 0; white-space: pre-wrap;">${itemsList}</pre>
-        </div>
-        <div class="total">
-          Итого: ${(orderData.total_amount / 100).toFixed(2)} ₽
         </div>
       </div>
     </div>
@@ -126,12 +121,11 @@ Email: ${orderData.email || "Не указан"}
 Адрес доставки:
 ${addressText}
 
-${orderData.comment ? `Комментарий: ${orderData.comment}\n` : ""}
+Комментарий заказчика:
+${orderData.comment || "Нет комментария"}
 
 Товары:
 ${itemsList}
-
-Итого: ${(orderData.total_amount / 100).toFixed(2)} ₽
   `;
 
   try {
