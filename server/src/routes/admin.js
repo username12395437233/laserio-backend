@@ -656,6 +656,54 @@ r.patch("/products/:id/images/:imageId/primary", async (req, res) => {
   res.json({ primary_image_url: img.url });
 });
 
+/** DELETE /admin/products/:id/images/:imageId — удалить фото из галереи */
+/**
+ * curl -X DELETE http://localhost:8000/admin/products/1/images/img_abcd \
+ *   -H "Authorization: Bearer <TOKEN>"
+ */
+r.delete("/products/:id/images/:imageId", async (req, res) => {
+  const id = Number(req.params.id);
+  const imageId = String(req.params.imageId);
+
+  const { rows } = await q(
+    "SELECT gallery, primary_image_url FROM products WHERE id=$1",
+    [id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "PRODUCT_NOT_FOUND" });
+
+  const gallery = rows[0].gallery || [];
+  const idx = gallery.findIndex((g) => g.id === imageId);
+  if (idx === -1) return res.status(404).json({ error: "IMAGE_NOT_FOUND" });
+
+  const [removed] = gallery.splice(idx, 1);
+
+  let newPrimary = rows[0].primary_image_url;
+  if (removed.url === newPrimary) {
+    newPrimary = gallery[0]?.url || null;
+  }
+
+  await q(
+    `UPDATE products
+       SET gallery=$1::jsonb,
+           primary_image_url=$2,
+           updated_at=NOW()
+     WHERE id=$3`,
+    [JSON.stringify(gallery), newPrimary, id]
+  );
+
+  // Попробуем удалить файл с диска (best effort)
+  if (removed.url?.startsWith("/uploads/")) {
+    const filePath = removed.url.replace("/uploads", "/app/uploads");
+    try {
+      fs.unlinkSync(filePath);
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  res.json({ ok: true, primary_image_url: newPrimary });
+});
+
 /** ------------- PDF DOC for PRODUCT ------------- */
 /** POST /admin/products/:id/doc (multipart) — upload and set doc */
 /**

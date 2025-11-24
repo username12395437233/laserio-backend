@@ -99,6 +99,7 @@ ADMIN_PASSWORD=secret
 - `GET /admin/products` - CRUD товаров
 - `POST /admin/products/:id/images` - загрузка фото
 - `PATCH /admin/products/:id/images/:imageId/primary` - установка главного фото
+- `DELETE /admin/products/:id/images/:imageId` - удаление фото из галереи
 - `POST /admin/products/:id/doc` - загрузка PDF документа
 
 Все админ эндпоинты требуют заголовок `Authorization: Bearer <token>`
