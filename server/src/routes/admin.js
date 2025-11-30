@@ -3,7 +3,11 @@ import bcrypt from "bcryptjs";
 import fs from "node:fs";
 import { q } from "../db.js";
 import { signAdminJwt, requireAdmin } from "../auth.js";
-import { uploadToProduct, uploadToMediaLibrary, upload } from "../utils/multer.js";
+import {
+  uploadToProduct,
+  uploadToMediaLibrary,
+  upload,
+} from "../utils/multer.js";
 
 const r = Router();
 
@@ -525,10 +529,7 @@ r.delete("/media-library/:id", async (req, res) => {
   if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
 
   // Получаем URL перед удалением
-  const { rows } = await q(
-    `SELECT url FROM media_library WHERE id=$1`,
-    [id]
-  );
+  const { rows } = await q(`SELECT url FROM media_library WHERE id=$1`, [id]);
   if (!rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
 
   const url = rows[0].url;
@@ -687,6 +688,38 @@ function genImageId() {
     "img_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
   );
 }
+
+/** GET /admin/products/:id/images — получить список фотографий товара
+ *  Пример:
+ *  curl http://localhost:8000/admin/products/1/images \
+ *    -H "Authorization: Bearer <TOKEN>"
+ */
+r.get("/products/:id/images", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "ID_REQUIRED" });
+
+  const { rows } = await q(
+    "SELECT gallery, primary_image_url FROM products WHERE id=$1",
+    [id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "PRODUCT_NOT_FOUND" });
+
+  const gallery = rows[0].gallery || [];
+  const primaryImageUrl = rows[0].primary_image_url;
+
+  // Добавляем флаг is_primary к каждой фотографии
+  const images = gallery.map((img) => ({
+    ...img,
+    is_primary: img.url === primaryImageUrl,
+  }));
+
+  res.json({
+    product_id: id,
+    primary_image_url: primaryImageUrl,
+    images,
+    total: images.length,
+  });
+});
 
 /** POST /admin/products/:id/images — загрузить фото и добавить в gallery */
 /**
@@ -877,7 +910,10 @@ r.post(
 r.get("/orders", async (req, res) => {
   const status = (req.query.status || "").trim();
   const page = Math.max(1, parseInt(req.query.page || "1", 10));
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || "20", 10)));
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(req.query.limit || "20", 10))
+  );
   const offset = (page - 1) * limit;
 
   const sortKey = (req.query.sort || "created_at_desc").toLowerCase();
@@ -896,7 +932,9 @@ r.get("/orders", async (req, res) => {
     sql += ` AND status = $${params.length}`;
   }
 
-  sql += ` ORDER BY ${orderBy} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  sql += ` ORDER BY ${orderBy} LIMIT $${params.length + 1} OFFSET $${
+    params.length + 2
+  }`;
   params.push(limit, offset);
 
   const { rows: orders } = await q(sql, params);
@@ -968,10 +1006,9 @@ r.patch("/orders/:id/shipped", async (req, res) => {
   }
 
   // Проверяем, что заказ существует
-  const { rows: orderRows } = await q(
-    `SELECT id FROM orders WHERE id=$1`,
-    [orderId]
-  );
+  const { rows: orderRows } = await q(`SELECT id FROM orders WHERE id=$1`, [
+    orderId,
+  ]);
   if (!orderRows[0]) return res.status(404).json({ error: "NOT_FOUND" });
 
   // Валидируем, что все shipped_items существуют в order_items этого заказа

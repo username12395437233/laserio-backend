@@ -15,3 +15,5 @@ WHERE address IS NULL;
 ALTER TABLE orders
 DROP COLUMN IF EXISTS address_json;
 
+
+

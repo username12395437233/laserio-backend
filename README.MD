@@ -106,6 +106,7 @@ ORDER_NOTIFICATION_EMAIL=zar.alexander00@mail.ru
 - `POST /admin/auth/login` - авторизация
 - `GET /admin/categories` - CRUD категорий
 - `GET /admin/products` - CRUD товаров
+- `GET /admin/products/:id/images` - получить список фотографий товара (с ID для удаления)
 - `POST /admin/products/:id/images` - загрузка фото
 - `PATCH /admin/products/:id/images/:imageId/primary` - установка главного фото
 - `DELETE /admin/products/:id/images/:imageId` - удаление фото из галереи
