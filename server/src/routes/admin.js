@@ -253,7 +253,7 @@ r.get("/products", async (req, res) => {
     params.push(is_active === "true");
     sql += ` AND is_active = $${params.length}`;
   }
-  sql += " ORDER BY id DESC LIMIT 200";
+  sql += " ORDER BY id ASC LIMIT 200";
   const { rows } = await q(sql, params);
   res.json(rows);
 });
@@ -478,7 +478,7 @@ r.get("/media-library", async (_req, res) => {
   const { rows } = await q(
     `SELECT id, name, url, created_at, updated_at
      FROM media_library
-     ORDER BY id DESC`
+     ORDER BY id ASC`
   );
   res.json(rows);
 });
@@ -921,7 +921,7 @@ r.get("/orders", async (req, res) => {
     created_at_asc: "created_at ASC",
     created_at_desc: "created_at DESC",
   };
-  const orderBy = sortMap[sortKey] || sortMap.created_at_desc;
+  const orderBy = sortMap[sortKey] || sortMap.created_at_asc;
 
   let sql = `SELECT id, created_at, customer_name, email, phone, comment, address, total_amount, status, shipped_items
              FROM orders WHERE 1=1`;

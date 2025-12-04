@@ -138,7 +138,7 @@ r.get("/categories/:slug/products", async (req, res) => {
     price_desc: "p.price DESC",
     name_asc: "p.name ASC",
     name_desc: "p.name DESC",
-    new: "p.id DESC",
+    new: "p.id ASC",
   };
   const sortKey = (req.query.sort || "new").toLowerCase();
   const orderBy = sortMap[sortKey] || sortMap.new;
@@ -220,7 +220,7 @@ r.get("/categories/:slug", async (req, res) => {
      JOIN categories c ON c.id = p.category_id
      WHERE p.is_active=true AND p.is_featured=true
        AND (c.path = $1 OR c.path LIKE $1 || '/%')
-     ORDER BY p.id DESC
+     ORDER BY p.id ASC
      LIMIT 3`,
     [category.path]
   );
@@ -245,7 +245,7 @@ r.get("/categories/:slug", async (req, res) => {
           p.primary_image_url,
           ROW_NUMBER() OVER (
             PARTITION BY cp.child_id
-            ORDER BY p.is_featured DESC, p.id DESC
+            ORDER BY p.is_featured DESC, p.id ASC
           ) AS rn
         FROM child_paths cp
         JOIN categories c ON (c.path = cp.child_path OR c.path LIKE cp.child_path || '/%')
@@ -292,7 +292,7 @@ r.get("/categories/:slug", async (req, res) => {
     price_desc: "price DESC",
     name_asc: "name ASC",
     name_desc: "name DESC",
-    new: "id DESC",
+    new: "id ASC",
   };
   const sortKey = (req.query.sort || "new").toLowerCase();
   const orderBy = sortMap[sortKey] || sortMap.new;
@@ -360,7 +360,7 @@ r.get("/products", async (req, res) => {
     price_desc: "p.price DESC",
     name_asc: "p.name ASC",
     name_desc: "p.name DESC",
-    new: "p.id DESC",
+    new: "p.id ASC",
   };
   const sortKey = (req.query.sort || "new").toLowerCase();
   const orderBy = sortMap[sortKey] || sortMap.new;
